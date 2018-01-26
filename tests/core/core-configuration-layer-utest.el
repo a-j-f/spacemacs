@@ -1,6 +1,6 @@
 ;;; core-configuration-layer-utest.el --- Spacemacs Unit Test File
 ;;
-;; Copyright (c) 2012-2017 Sylvain Benner & Contributors
+;; Copyright (c) 2012-2018 Sylvain Benner & Contributors
 ;;
 ;; Author: Sylvain Benner <sylvain.benner@gmail.com>
 ;; URL: https://github.com/syl20bnr/spacemacs
@@ -15,7 +15,13 @@
 (defun helper--add-layers (layers &optional usedp)
   "Set the layer variables given a list of LAYERS objects."
   (dolist (layer layers)
-    (configuration-layer//add-layer layer usedp)))
+    (configuration-layer//add-layer layer usedp))
+  ;; hackish but we need to reverse the list in order to have the layer
+  ;; in the correct order (this reverse in normally performed in function
+  ;; configuration-layer//declare-used-layers )
+  (when usedp
+    (setq configuration-layer--used-layers
+          (reverse configuration-layer--used-layers))))
 
 (defun helper--add-packages (packages &optional usedp)
   "Set the package variables given a list of PACKAGES objects."
@@ -164,6 +170,49 @@
                            :selected-packages '(pkg-unknown))))
     (should (null (cfgl-layer-get-packages layer)))))
 
+;; method: cfgl-layer-get-shadowing-layers
+
+(ert-deftest test-cfgl-layer-get-shadowing-layers--l2-declared-after-l1-shadows-l1 ()
+  (let ((layer1 (cfgl-layer "layer1" :name 'layer1))
+        (layer2 (cfgl-layer "layer2" :name 'layer2))
+        (configuration-layer--used-layers nil)
+        (configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers `(,layer1 ,layer2) 'used)
+    (configuration-layer/declare-shadow-relation 'layer1 'layer2)
+    (should (and (equal '(layer2) (cfgl-layer-get-shadowing-layers layer1))
+                 (equal '() (cfgl-layer-get-shadowing-layers layer2))))))
+
+(ert-deftest test-cfgl-layer-get-shadowing-layers--l1-declared-after-l2-shadows-l2 ()
+  (let ((layer1 (cfgl-layer "layer1" :name 'layer1))
+        (layer2 (cfgl-layer "layer2" :name 'layer2))
+        (configuration-layer--used-layers nil)
+        (configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers `(,layer1 ,layer2) 'used)
+    (configuration-layer/declare-shadow-relation 'layer1 'layer2)
+    (should (and (equal '(layer2) (cfgl-layer-get-shadowing-layers layer1))
+                 (equal '() (cfgl-layer-get-shadowing-layers layer2))))))
+
+(ert-deftest test-cfgl-layer-get-shadowing-layers--prevent-l2-from-shadowing-l1 ()
+  (let ((layer1 (cfgl-layer "layer1" :name 'layer1))
+        (layer2 (cfgl-layer "layer2" :name 'layer2 :can-shadow nil))
+        (configuration-layer--used-layers nil)
+        (configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers `(,layer1 ,layer2) 'used)
+    (configuration-layer/declare-shadow-relation 'layer2 'layer1)
+    (should (null (cfgl-layer-get-shadowing-layers layer1)))))
+
+(ert-deftest test-cfgl-layer-get-shadowing-layers--prevent-l2-from-shadowing-l1-alternative ()
+  ;; using the commutative property of the can-shadow relation
+  ;; setting :can-shadow to nil on layer1 produces the same effect as the more
+  ;; intuitive test-cfgl-layer-get-shadowing-layers--prevent-l2-from-shadowing-l1
+  (let ((layer1 (cfgl-layer "layer1" :name 'layer1 :can-shadow nil))
+        (layer2 (cfgl-layer "layer2" :name 'layer2))
+        (configuration-layer--used-layers nil)
+        (configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers `(,layer1 ,layer2) 'used)
+    (configuration-layer/declare-shadow-relation 'layer2 'layer1)
+    (should (null (cfgl-layer-get-shadowing-layers layer1)))))
+
 ;; ---------------------------------------------------------------------------
 ;; configuration-layer/layer-used-p
 ;; ---------------------------------------------------------------------------
@@ -181,6 +230,15 @@
     (helper--add-layers `(,(cfgl-layer "usedlayer" :name 'usedlayer)) 'used)
     (helper--add-layers `(,(cfgl-layer "notusedlayer" :name 'notusedlayer)))
     (should (null (configuration-layer/layer-used-p 'notusedlayer)))))
+
+(ert-deftest test-layer-used-p--returns-false-when-layer-is-shadowed ()
+  (let ((usedlayer1 (cfgl-layer "usedlayer1" :name 'usedlayer1))
+        (usedlayer2 (cfgl-layer "usedlayer2" :name 'usedlayer2))
+        configuration-layer--used-layers
+        (configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers `(,usedlayer1 ,usedlayer2) 'used)
+    (configuration-layer/declare-shadow-relation 'usedlayer2 'usedlayer1)
+    (should (not (configuration-layer/layer-used-p 'usedlayer1)))))
 
 (ert-deftest test-layer-used-p--dotfile-layer-is-always-used ()
   (should (configuration-layer/layer-used-p 'dotfile)))
@@ -666,6 +724,10 @@
   (let ((input '("spacelpa" . "/home/rms/.elpa/spacelpa")))
     (should (configuration-layer//package-archive-absolute-path-p input))))
 
+(ert-deftest test-package-archive-absolute-pathp--windows-absolute-path ()
+  (let ((input '("spacelpa" . "c:/Users/My User/.elpa/spacelpa")))
+    (should (configuration-layer//package-archive-absolute-path-p input))))
+
 (ert-deftest test-package-archive-absolute-pathp--relative-path-local ()
   (let ((input '("melpa" . "../.elpa/spacelpa")))
     (should (not (configuration-layer//package-archive-absolute-path-p input)))))
@@ -694,6 +756,10 @@
   (let ((input '("spacelpa" . "/home/rms/.elpa/spacelpa")))
     (should (configuration-layer//package-archive-local-path-p input))))
 
+(ert-deftest test-package-archive-local-pathp--windows-local-path ()
+  (let ((input '("spacelpa" . "c:/Users/My User/.elpa/spacelpa")))
+    (should (configuration-layer//package-archive-local-path-p input))))
+
 (ert-deftest test-package-archive-local-pathp--relative-local-path-local ()
   (let ((input '("melpa" . "../.elpa/spacelpa")))
     (should (configuration-layer//package-archive-local-path-p input))))
@@ -718,16 +784,10 @@
     (should (equal '(("melpa" . "http://melpa.org/packages/"))
                    (configuration-layer//resolve-package-archives input)))))
 
-(ert-deftest test-resolve-package-archives--org-supports-http ()
-  (let ((input '(("org"   . "orgmode.org/elpa/")))
-        dotspacemacs-elpa-https)
-    (should (equal '(("org" . "http://orgmode.org/elpa/"))
-                   (configuration-layer//resolve-package-archives input)))))
-
-(ert-deftest test-resolve-package-archives--org-does-not-support-https ()
+(ert-deftest test-resolve-package-archives--org-supports-https ()
   (let ((input '(("org"   . "orgmode.org/elpa/")))
         (dotspacemacs-elpa-https t))
-    (should (equal '(("org" . "http://orgmode.org/elpa/"))
+    (should (equal '(("org" . "https://orgmode.org/elpa/"))
                    (configuration-layer//resolve-package-archives input)))))
 
 (ert-deftest test-resolve-package-archives--idempotent-when-already-http-prefix ()
@@ -815,6 +875,8 @@
 ;; configuration-layer/make-layer
 ;; ---------------------------------------------------------------------------
 
+;; layer directory
+
 (ert-deftest test-make-layer--make-layer-from-symbol-with-a-dir ()
   (should (equal (cfgl-layer "layer"
                              :name 'layer
@@ -851,6 +913,8 @@
                                :name 'layer
                                :dir spacemacs-start-directory)
                    (configuration-layer/make-layer 'layer layer)))))
+
+;; load packages
 
 (ert-deftest test-make-layer--make-used-layer-loads-packages-file ()
   (let ((layer (cfgl-layer "layer"
@@ -899,11 +963,14 @@
      ((file-exists-p (f) ((:output t :occur 1))))
      (configuration-layer/make-layer 'layer layer))))
 
+;; set/override properties
+
 (ert-deftest test-make-layer--make-used-layer-can-set-additional-properties ()
   (let ((layer (cfgl-layer "layer"
                            :name 'layer
                            :dir spacemacs-start-directory))
         (layer-specs '(layer :disabled-for pkg8 pkg9
+                             :can-shadow layer2 layer3
                              :variables foo bar toto 1))
         (layer-packages '(pkg1 pkg2 pkg3))
         (mocker-mock-default-record-cls 'mocker-stub-record))
@@ -913,6 +980,7 @@
      (should (equal (cfgl-layer "layer"
                                 :name 'layer
                                 :disabled-for '(pkg8 pkg9)
+                                :can-shadow '(layer2 layer3)
                                 :variables '(foo bar toto 1)
                                 :packages '(pkg1 pkg2 pkg3)
                                 :selected-packages 'all
@@ -924,11 +992,13 @@
                            :name 'layer
                            :dir spacemacs-start-directory))
         (layer-specs '(layer :disabled-for pkg8 pkg9
+                             :can-shadow layer2
                              :variables foo bar toto 1))
         (layer-packages '(pkg1 pkg2 pkg3)))
     (should (equal (cfgl-layer "layer"
                                :name 'layer
                                :disabled-for nil
+                               :can-shadow 'unspecified
                                :variables nil
                                :packages nil
                                :selected-packages 'all
@@ -939,9 +1009,11 @@
   (let ((layer (cfgl-layer "layer"
                            :name 'layer
                            :disabled-for '(pkg10)
+                           :can-shadow '()
                            :variables '(titi tata tutu 1)
                            :dir spacemacs-start-directory))
         (layer-specs '(layer :disabled-for pkg8 pkg9
+                             :can-shadow layer2
                              :variables foo bar toto 1))
         (layer-packages '(pkg1 pkg2 pkg3))
         (mocker-mock-default-record-cls 'mocker-stub-record))
@@ -951,6 +1023,7 @@
      (should (equal (cfgl-layer "layer"
                                 :name 'layer
                                 :disabled-for '(pkg8 pkg9)
+                                :can-shadow '(layer2)
                                 :variables '(foo bar toto 1)
                                 :packages '(pkg1 pkg2 pkg3)
                                 :selected-packages 'all
@@ -961,21 +1034,117 @@
   (let ((layer (cfgl-layer "layer"
                            :name 'layer
                            :disabled-for '(pkg10)
+                           :can-shadow '()
                            :variables '(titi tata tutu 1)
                            :packages '(pkg1 pkg2 pkg3)
                            :selected-packages 'all
                            :dir spacemacs-start-directory))
         (layer-specs '(layer :disabled-for pkg8 pkg9
+                             :can-shadow '(layer2)
                              :variables foo bar toto 1))
         (mocker-mock-default-record-cls 'mocker-stub-record))
     (should (equal (cfgl-layer "layer"
                                :name 'layer
                                :disabled-for '(pkg10)
+                               :can-shadow '()
                                :variables '(titi tata tutu 1)
                                :packages '(pkg1 pkg2 pkg3)
                                :selected-packages 'all
                                :dir spacemacs-start-directory)
                    (configuration-layer/make-layer layer-specs layer)))))
+
+;; ---------------------------------------------------------------------------
+;; configuration-layer//declare-shadow-relation
+;; ---------------------------------------------------------------------------
+
+(ert-deftest test-declare-shadow-relation--is-commutative ()
+  (let ((configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers
+     `(,(cfgl-layer "layer-shadow-1" :name 'layer-shadow-1)
+       ,(cfgl-layer "layer-shadow-2" :name 'layer-shadow-2)))
+    (configuration-layer/declare-shadow-relation
+     'layer-shadow-1
+     'layer-shadow-2)
+    (should (and
+             (equal '(layer-shadow-1) (oref (configuration-layer/get-layer
+                                             'layer-shadow-2)
+                                            :can-shadow))
+             (equal '(layer-shadow-2) (oref (configuration-layer/get-layer
+                                             'layer-shadow-1)
+                                            :can-shadow))))))
+
+(ert-deftest test-declare-shadow-relation--is-idempotent ()
+  (let ((configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers
+     `(,(cfgl-layer "layer-shadow-1" :name 'layer-shadow-1)
+       ,(cfgl-layer "layer-shadow-2" :name 'layer-shadow-2)))
+    (dotimes (i 3)
+      (configuration-layer/declare-shadow-relation
+       'layer-shadow-1
+       'layer-shadow-2))
+    (dotimes (i 3)
+      (configuration-layer/declare-shadow-relation
+       'layer-shadow-2
+       'layer-shadow-1))
+    (should (and (equal '(layer-shadow-1)
+                        (oref (configuration-layer/get-layer 'layer-shadow-2)
+                              :can-shadow))
+                 (equal '(layer-shadow-2)
+                        (oref (configuration-layer/get-layer 'layer-shadow-1)
+                              :can-shadow))))))
+
+(ert-deftest test-declare-shadow-relation--layer-1-shadows-multiple-layers ()
+  (let ((configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers
+     `(,(cfgl-layer "layer-shadow-1" :name 'layer-shadow-1)
+       ,(cfgl-layer "layer-shadow-2" :name 'layer-shadow-2)
+       ,(cfgl-layer "layer-shadow-3" :name 'layer-shadow-3)))
+    (configuration-layer/declare-shadow-relation
+     'layer-shadow-1
+     'layer-shadow-2
+     'layer-shadow-3)
+    (should (equal '(layer-shadow-1)
+                   (oref (configuration-layer/get-layer 'layer-shadow-2)
+                         :can-shadow)))
+    (should (equal '(layer-shadow-1)
+                   (oref (configuration-layer/get-layer 'layer-shadow-3)
+                         :can-shadow)))
+    (should (equal '(layer-shadow-3 layer-shadow-2)
+                   (oref (configuration-layer/get-layer 'layer-shadow-1)
+                         :can-shadow)))))
+
+(ert-deftest test-declare-shadow-relation--unknown-layer-shadows-known-layer ()
+  (let ((configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers
+     `(,(cfgl-layer "layer-shadow-2" :name 'layer-shadow-2)))
+    (mocker-let
+     ((configuration-layer//warning
+       (msg &rest args)
+       ((:record-cls 'mocker-stub-record :output nil :occur 1))))
+     (configuration-layer/declare-shadow-relation
+      'layer-shadow-1
+      'layer-shadow-2)
+     (should (eq 'unspecified
+                 (oref (configuration-layer/get-layer 'layer-shadow-2)
+                       :can-shadow))))))
+
+(ert-deftest test-declare-shadow-relation--known-layer-shadows-unknown-layer ()
+  (let ((configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (helper--add-layers
+     `(,(cfgl-layer "layer-shadow-1" :name 'layer-shadow-1)))
+    (mocker-let
+     ((configuration-layer//warning
+       (msg &rest args)
+       ((:record-cls 'mocker-stub-record :output nil :occur 1))))
+     (configuration-layer/declare-shadow-relation 'layer-shadow-1 'layer-shadow-2))))
+
+(ert-deftest test-declare-shadow-relation--unknown-layer-shadows-unknown-layer ()
+  (let ((configuration-layer--indexed-layers (make-hash-table :size 1024)))
+    (mocker-let
+     ((configuration-layer//warning
+       (msg &rest args)
+       ((:record-cls 'mocker-stub-record :output nil :occur 2))))
+     (configuration-layer/declare-shadow-relation 'layer-shadow-1 'layer-shadow-2))))
 
 ;; ---------------------------------------------------------------------------
 ;; configuration-layer//set-layers-variables
@@ -1892,6 +2061,42 @@
                     (ht-keys configuration-layer--indexed-packages))))))
 
 ;; ---------------------------------------------------------------------------
+;; configuration-layer//pre-configure-package
+;; ---------------------------------------------------------------------------
+
+(ert-deftest test-pre-configure-package--pre-init-is-evaluated ()
+  (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1) :pre-layers '(layer2)))
+        configuration-layer--used-layers
+        (configuration-layer--indexed-layers (make-hash-table :size 1024))
+        (mocker-mock-default-record-cls 'mocker-stub-record))
+    (helper--add-layers `(,(cfgl-layer "layer1" :name 'layer1)
+                          ,(cfgl-layer "layer2" :name 'layer2)) t)
+    (defun layer1/init-pkg nil)
+    (defun layer2/pre-init-pkg nil)
+    (mocker-let
+     ((spacemacs-buffer/message (m) ((:output nil)))
+      (layer2/pre-init-pkg nil ((:output nil :occur 1))))
+     (configuration-layer//pre-configure-package pkg))))
+
+;; ---------------------------------------------------------------------------
+;; configuration-layer//post-configure-package
+;; ---------------------------------------------------------------------------
+
+(ert-deftest test-post-configure-package--post-init-is-evaluated ()
+  (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1) :post-layers '(layer2)))
+        configuration-layer--used-layers
+        (configuration-layer--indexed-layers (make-hash-table :size 1024))
+        (mocker-mock-default-record-cls 'mocker-stub-record))
+    (helper--add-layers `(,(cfgl-layer "layer1" :name 'layer1)
+                          ,(cfgl-layer "layer2" :name 'layer2)) t)
+    (defun layer1/init-pkg nil)
+    (defun layer2/post-init-pkg nil)
+    (mocker-let
+     ((spacemacs-buffer/message (m) ((:output nil)))
+      (layer2/post-init-pkg nil ((:output nil :occur 1))))
+     (configuration-layer//post-configure-package pkg))))
+
+;; ---------------------------------------------------------------------------
 ;; configuration-layer//configure-package
 ;; ---------------------------------------------------------------------------
 
@@ -1906,64 +2111,6 @@
      ((spacemacs-buffer/message (m) ((:output nil)))
       (layer1/init-pkg nil ((:output nil :occur 1))))
      (configuration-layer//configure-package pkg))))
-
-(ert-deftest test-configure-package--pre-init-is-evaluated ()
-  (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1) :pre-layers '(layer2)))
-        configuration-layer--used-layers
-        (configuration-layer--indexed-layers (make-hash-table :size 1024))
-        (mocker-mock-default-record-cls 'mocker-stub-record))
-    (helper--add-layers `(,(cfgl-layer "layer1" :name 'layer1)
-                          ,(cfgl-layer "layer2" :name 'layer2)) t)
-    (defun layer1/init-pkg nil)
-    (defun layer2/pre-init-pkg nil)
-    (mocker-let
-     ((spacemacs-buffer/message (m) ((:output nil)))
-      (layer2/pre-init-pkg nil ((:output nil :occur 1))))
-     (configuration-layer//configure-package pkg))))
-
-(ert-deftest test-configure-package--post-init-is-evaluated ()
-  (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1) :post-layers '(layer2)))
-        configuration-layer--used-layers
-        (configuration-layer--indexed-layers (make-hash-table :size 1024))
-        (mocker-mock-default-record-cls 'mocker-stub-record))
-    (helper--add-layers `(,(cfgl-layer "layer1" :name 'layer1)
-                          ,(cfgl-layer "layer2" :name 'layer2)) t)
-    (defun layer1/init-pkg nil)
-    (defun layer2/post-init-pkg nil)
-    (mocker-let
-     ((spacemacs-buffer/message (m) ((:output nil)))
-      (layer2/post-init-pkg nil ((:output nil :occur 1))))
-     (configuration-layer//configure-package pkg))))
-
-(ert-deftest test-configure-package--pre-init-is-evaluated-before-init ()
-  (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1) :pre-layers '(layer2)))
-        configuration-layer--used-layers
-        (configuration-layer--indexed-layers (make-hash-table :size 1024))
-        (witness nil)
-        (mocker-mock-default-record-cls 'mocker-stub-record))
-    (helper--add-layers `(,(cfgl-layer "layer1" :name 'layer1)
-                          ,(cfgl-layer "layer2" :name 'layer2)) t)
-    (defun layer1/init-pkg () (push 'init witness))
-    (defun layer2/pre-init-pkg () (push 'pre-init witness))
-    (mocker-let
-     ((spacemacs-buffer/message (m) ((:output nil))))
-     (configuration-layer//configure-package pkg)
-     (should (equal '(init pre-init) witness)))))
-
-(ert-deftest test-configure-package--post-init-is-evaluated-after-init ()
-  (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1) :post-layers '(layer2)))
-        configuration-layer--used-layers
-        (configuration-layer--indexed-layers (make-hash-table :size 1024))
-        (witness nil)
-        (mocker-mock-default-record-cls 'mocker-stub-record))
-    (helper--add-layers `(,(cfgl-layer "layer1" :name 'layer1)
-                          ,(cfgl-layer "layer2" :name 'layer2)) t)
-    (defun layer1/init-pkg () (push 'init witness))
-    (defun layer2/post-init-pkg () (push 'post-init witness))
-    (mocker-let
-     ((spacemacs-buffer/message (m) ((:output nil))))
-     (configuration-layer//configure-package pkg)
-     (should (equal '(post-init init) witness)))))
 
 (ert-deftest test-configure-package--disabled-for-does-not-call-pre-post-init ()
   (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1)
@@ -2002,7 +2149,9 @@
     (defun layer3/post-init-pkg () (push 'post-init witness))
     (mocker-let
      ((spacemacs-buffer/message (m) ((:output nil))))
+     (configuration-layer//pre-configure-package pkg)
      (configuration-layer//configure-package pkg)
+     (configuration-layer//post-configure-package pkg)
      (should (equal '(post-init init pre-init) witness)))))
 
 (ert-deftest test-configure-package--enabled-for-nil-does-not-call-pre-post-init ()
@@ -2021,9 +2170,9 @@
     (defun layer2/pre-init-pkg () (push 'pre-init witness))
     (defun layer3/post-init-pkg () (push 'post-init witness))
     (mocker-let
-        ((spacemacs-buffer/message (m) ((:output nil))))
-      (configuration-layer//configure-package pkg)
-      (should (equal '(init) witness)))))
+     ((spacemacs-buffer/message (m) ((:output nil))))
+     (configuration-layer//configure-package pkg)
+     (should (equal '(init) witness)))))
 
 (ert-deftest test-configure-package--enabled-for-partial ()
   (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1)
@@ -2041,13 +2190,50 @@
     (defun layer2/pre-init-pkg () (push 'pre-init witness))
     (defun layer3/post-init-pkg () (push 'post-init witness))
     (mocker-let
-        ((spacemacs-buffer/message (m) ((:output nil))))
-      (configuration-layer//configure-package pkg)
-      (should (equal '(init pre-init) witness)))))
+     ((spacemacs-buffer/message (m) ((:output nil))))
+     (configuration-layer//pre-configure-package pkg)
+     (configuration-layer//configure-package pkg)
+     (should (equal '(init pre-init) witness)))))
 
 ;; ---------------------------------------------------------------------------
 ;; configuration-layer//configure-packages-2
 ;; ---------------------------------------------------------------------------
+
+(ert-deftest test-configure-packages-2--pre-init-is-evaluated-before-init ()
+  (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1) :pre-layers '(layer2)))
+        configuration-layer--used-layers
+        (configuration-layer--indexed-layers (make-hash-table :size 1024))
+        configuration-layer--used-packages
+        (configuration-layer--indexed-packages (make-hash-table :size 2048))
+        (witness nil)
+        (mocker-mock-default-record-cls 'mocker-stub-record))
+    (helper--add-layers `(,(cfgl-layer "layer1" :name 'layer1)
+                          ,(cfgl-layer "layer2" :name 'layer2)) t)
+    (helper--add-packages (list pkg) t)
+    (defun layer1/init-pkg () (push 'init witness))
+    (defun layer2/pre-init-pkg () (push 'pre-init witness))
+    (mocker-let
+     ((spacemacs-buffer/loading-animation nil ((:output nil))))
+     (configuration-layer//configure-packages-2 `(,(oref pkg :name)))
+     (should (equal '(init pre-init) witness)))))
+
+(ert-deftest test-configure-packages-2--post-init-is-evaluated-after-init ()
+  (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1) :post-layers '(layer2)))
+        configuration-layer--used-layers
+        (configuration-layer--indexed-layers (make-hash-table :size 1024))
+        configuration-layer--used-packages
+        (configuration-layer--indexed-packages (make-hash-table :size 2048))
+        (witness nil)
+        (mocker-mock-default-record-cls 'mocker-stub-record))
+    (helper--add-layers `(,(cfgl-layer "layer1" :name 'layer1)
+                          ,(cfgl-layer "layer2" :name 'layer2)) t)
+    (helper--add-packages (list pkg) t)
+    (defun layer1/init-pkg () (push 'init witness))
+    (defun layer2/post-init-pkg () (push 'post-init witness))
+    (mocker-let
+     ((spacemacs-buffer/loading-animation nil ((:output nil))))
+     (configuration-layer//configure-packages-2 `(,(oref pkg :name)))
+     (should (equal '(post-init init) witness)))))
 
 (ert-deftest test-configure-packages-2--package-w/-layer-owner-is-configured()
   (let ((pkg (cfgl-package "pkg" :name 'pkg :owners '(layer1)))

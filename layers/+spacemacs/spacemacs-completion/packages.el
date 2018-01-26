@@ -1,6 +1,6 @@
 ;;; packages.el --- Spacemacs Completion Layer packages File
 ;;
-;; Copyright (c) 2012-2017 Sylvain Benner & Contributors
+;; Copyright (c) 2012-2018 Sylvain Benner & Contributors
 ;;
 ;; Author: Sylvain Benner <sylvain.benner@gmail.com>
 ;; URL: https://github.com/syl20bnr/spacemacs
@@ -21,7 +21,7 @@
   (setq helm-prevent-escaping-from-minibuffer t
         helm-bookmark-show-location t
         helm-display-header-line nil
-        helm-split-window-in-side-p t
+        helm-split-window-inside-p t
         helm-always-two-windows t
         helm-echo-input-in-header-line t
         helm-imenu-execute-action-at-once-if-one nil
@@ -29,9 +29,9 @@
         helm-display-function 'spacemacs//display-helm-window)
   (with-eval-after-load 'helm
     (spacemacs|hide-lighter helm-mode)
-    (when (and dotspacemacs-helm-resize
-               (or (eq dotspacemacs-helm-position 'bottom)
-                   (eq dotspacemacs-helm-position 'top)))
+    (when (and helm-enable-auto-resize
+               (or (eq helm-position 'bottom)
+                   (eq helm-position 'top)))
       (setq helm-autoresize-min-height 10)
       (helm-autoresize-mode 1))
     ;; setup hooks
@@ -47,7 +47,7 @@
     (add-hook 'spacemacs-editing-style-hook 'spacemacs//helm-hjkl-navigation)
     ;; setup advices
     ;; fuzzy matching for all the sourcess
-    (unless (eq dotspacemacs-helm-use-fuzzy 'source)
+    (unless (eq helm-use-fuzzy 'source)
       (advice-add 'helm-make-source :around #'spacemacs//helm-make-source))
 
     (defadvice spacemacs/post-theme-init
@@ -172,7 +172,7 @@ Current Action: %s(ivy-action-name)
       ("c" ivy-call)
       ("C-m" ivy-done :exit t)
       ("C" ivy-toggle-calling)
-      ("m" ivy-toggle-fuzzy)
+      ("m" ivy-rotate-preferred-builders)
       (">" ivy-minibuffer-grow)
       ("<" ivy-minibuffer-shrink)
       ("w" ivy-prev-action)

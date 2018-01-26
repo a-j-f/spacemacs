@@ -1,6 +1,6 @@
 ;;; packages.el --- Helm Layer packages File
 ;;
-;; Copyright (c) 2012-2017 Sylvain Benner & Contributors
+;; Copyright (c) 2012-2018 Sylvain Benner & Contributors
 ;;
 ;; Author: Sylvain Benner <sylvain.benner@gmail.com>
 ;; URL: https://github.com/syl20bnr/spacemacs
@@ -59,7 +59,8 @@
 (defun helm/init-helm ()
   (use-package helm
     :defer 1
-    :commands (spacemacs/helm-find-files)
+    :commands (spacemacs/helm-find-files
+               helm-current-directory)
     :init
     (progn
       (add-hook 'helm-cleanup-hook #'spacemacs//helm-cleanup)
@@ -128,7 +129,6 @@
       (helm-locate-set-command)
       (setq helm-locate-fuzzy-match (string-match "locate" helm-locate-command))
       ;; alter helm-bookmark key bindings to be simpler
-      ;; TODO check if there is a more elegant solution to setup these bindings
       (defun simpler-helm-bookmark-keybindings ()
         (define-key helm-bookmark-map (kbd "C-d") 'helm-bookmark-run-delete)
         (define-key helm-bookmark-map (kbd "C-e") 'helm-bookmark-run-edit)
@@ -137,9 +137,13 @@
         (define-key helm-bookmark-map
           (kbd "C-o") 'helm-bookmark-run-jump-other-window)
         (define-key helm-bookmark-map (kbd "C-/") 'helm-bookmark-help))
-      (add-hook 'helm-mode-hook 'simpler-helm-bookmark-keybindings)
+      (with-eval-after-load 'helm-bookmark
+        (simpler-helm-bookmark-keybindings))
       (with-eval-after-load 'helm-mode ; required
-        (spacemacs|hide-lighter helm-mode)))))
+        (spacemacs|hide-lighter helm-mode))
+      (define-key helm-buffer-map (kbd "RET") 'spacemacs/helm-find-buffers-windows)
+      (define-key helm-generic-files-map (kbd "RET") 'spacemacs/helm-find-files-windows)
+      (define-key helm-find-files-map (kbd "RET") 'spacemacs/helm-find-files-windows))))
 
 (defun helm/init-helm-ag ()
   (use-package helm-ag
@@ -580,9 +584,7 @@ Search for a search tool in the order provided by `dotspacemacs-search-tools'."
       (add-hook 'helm-mode-hook 'helm-descbinds-mode)
       (spacemacs/set-leader-keys "?" 'helm-descbinds))))
 
-(defun helm/init-helm-flx ()
-  (use-package helm-flx
-    :defer t)
+(defun helm/pre-init-helm-flx ()
   (spacemacs|use-package-add-hook helm
     :pre-config
     (progn
@@ -590,6 +592,9 @@ Search for a search tool in the order provided by `dotspacemacs-search-tools'."
       ;; https://github.com/PythonNut/helm-flx/issues/9
       (setq helm-flx-for-helm-find-files nil)
       (helm-flx-mode))))
+
+(defun helm/init-helm-flx ()
+  (use-package helm-flx :defer t))
 
 (defun helm/init-helm-make ()
   (use-package helm-make
@@ -608,6 +613,22 @@ Search for a search tool in the order provided by `dotspacemacs-search-tools'."
       ;; "hm"    'helm-disable-minor-mode
       "h C-m" 'helm-enable-minor-mode)))
 
+(defun helm/pre-init-helm-projectile ()
+  ;; overwrite projectile settings
+  (spacemacs|use-package-add-hook projectile
+    :post-init
+    (progn
+      (setq projectile-switch-project-action 'helm-projectile)
+      (spacemacs/set-leader-keys
+        "pb"  'helm-projectile-switch-to-buffer
+        "pd"  'helm-projectile-find-dir
+        "pf"  'helm-projectile-find-file
+        "pF"  'helm-projectile-find-file-dwim
+        "ph"  'helm-projectile
+        "pp"  'helm-projectile-switch-project
+        "pr"  'helm-projectile-recentf
+        "sgp" 'helm-projectile-grep))))
+
 (defun helm/init-helm-projectile ()
   (use-package helm-projectile
     :commands (helm-projectile-switch-to-buffer
@@ -624,21 +645,9 @@ Search for a search tool in the order provided by `dotspacemacs-search-tools'."
       (defalias 'spacemacs/helm-project-do-grep 'helm-projectile-grep)
       (defalias
         'spacemacs/helm-project-do-grep-region-or-symbol
-        'helm-projectile-grep)
-      ;; overwrite projectile settings
-      (spacemacs|use-package-add-hook projectile
-        :post-init
-        (progn
-          (setq projectile-switch-project-action 'helm-projectile)
-          (spacemacs/set-leader-keys
-            "pb"  'helm-projectile-switch-to-buffer
-            "pd"  'helm-projectile-find-dir
-            "pf"  'helm-projectile-find-file
-            "pF"  'helm-projectile-find-file-dwim
-            "ph"  'helm-projectile
-            "pp"  'helm-projectile-switch-project
-            "pr"  'helm-projectile-recentf
-            "sgp" 'helm-projectile-grep))))))
+        'helm-projectile-grep))
+    :config (define-key helm-projectile-find-file-map
+              (kbd "RET") 'spacemacs/helm-find-files-windows)))
 
 (defun helm/init-helm-spacemacs-help ()
   (use-package helm-spacemacs-help
@@ -709,10 +718,12 @@ Search for a search tool in the order provided by `dotspacemacs-search-tools'."
   ;;  Restore popwin-mode after a Helm session finishes.
   (add-hook 'helm-cleanup-hook #'spacemacs//helm-restore-display))
 
+(defun helm/pre-init-persp-mode ()
+  (spacemacs|use-package-add-hook persp-mode
+    :post-config
+    (setq
+     spacemacs--persp-display-buffers-func 'spacemacs/persp-helm-mini
+     spacemacs--persp-display-perspectives-func 'spacemacs/helm-perspectives)))
+
 (defun helm/post-init-projectile ()
   (setq projectile-completion-system 'helm))
-
-(defun helm/post-init-persp-mode ()
-  (spacemacs/transient-state-register-add-bindings 'layouts
-    '(("b" spacemacs/persp-helm-mini :exit t)
-      ("l" spacemacs/helm-perspectives :exit t))))
